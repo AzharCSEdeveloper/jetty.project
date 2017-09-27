@@ -64,6 +64,8 @@ public class ReservedThreadExecutor extends AbstractLifeCycle implements Executo
     private final AtomicInteger _size = new AtomicInteger();
     private final AtomicInteger _pending = new AtomicInteger();
 
+    private ThreadBudget.Lease _lease;
+    private Object _owner;
     private long _idleTime = 1L;
     private TimeUnit _idleTimeUnit = TimeUnit.MINUTES;
 
@@ -80,25 +82,43 @@ public class ReservedThreadExecutor extends AbstractLifeCycle implements Executo
      */
     public ReservedThreadExecutor(Executor executor, int capacity)
     {
-        if (capacity < 0)
-        {
-            int cpus = Runtime.getRuntime().availableProcessors();
-            if (executor instanceof ThreadPool.SizedThreadPool)
-            {
-                int threads = ((ThreadPool.SizedThreadPool)executor).getMaxThreads();
-                capacity = Math.max(1, Math.min(cpus, threads / 8));
-            }
-            else
-            {
-                capacity = cpus;
-            }
-        }
+        this(executor,capacity,null);
+    }
 
+    /**
+     * @param executor The executor to use to obtain threads
+     * @param capacity The number of threads to preallocate. If less than 0 then capacity
+     * is calculated based on a heuristic from the number of available processors and
+     * thread pool size.
+     */
+    public ReservedThreadExecutor(Executor executor,int capacity, Object owner)
+    {
         _executor = executor;
-        _capacity = capacity;
+        _capacity = reservedThreads(executor,capacity);
         _stack = new ConcurrentStack.NodeStack<>();
+        _owner = owner;
 
         LOG.debug("{}",this);
+    }
+    /**
+     * @param executor The executor to use to obtain threads
+     * @param capacity The number of threads to preallocate, If less than 0 then capacity
+     * is calculated based on a heuristic from the number of available processors and
+     * thread pool size.
+     * @return the number of reserved threads that would be used by a ReservedThreadExecutor
+     * constructed with these arguments.
+     */
+    public static int reservedThreads(Executor executor,int capacity)
+    {
+        if (capacity>=0)
+            return capacity;
+        int cpus = Runtime.getRuntime().availableProcessors();
+        if (executor instanceof ThreadPool.SizedThreadPool)
+        {
+            int threads = ((ThreadPool.SizedThreadPool)executor).getMaxThreads();
+            return Math.max(1, Math.min(cpus, threads / 8));
+        }
+        return cpus;
     }
 
     public Executor getExecutor()
@@ -146,8 +166,17 @@ public class ReservedThreadExecutor extends AbstractLifeCycle implements Executo
     }
 
     @Override
+    public void doStart() throws Exception
+    {
+        _lease = ThreadBudget.leaseFrom(getExecutor(),this,_queue.length);
+        super.doStart();
+    }
+
+    @Override
     public void doStop() throws Exception
     {
+        if (_lease!=null)
+            _lease.close();
         while(true)
         {
             ReservedThread thread = _stack.pop();
@@ -226,7 +255,9 @@ public class ReservedThreadExecutor extends AbstractLifeCycle implements Executo
     @Override
     public String toString()
     {
-        return String.format("%s@%x{s=%d,p=%d}",this.getClass().getSimpleName(),hashCode(),_size.get(),_pending.get());
+        if (_owner==null)
+            return String.format("%s@%x{s=%d,p=%d}",this.getClass().getSimpleName(),hashCode(),_size,_pending);
+        return String.format("%s@%s{s=%d,p=%d}",this.getClass().getSimpleName(),_owner,_size,_pending);
     }
 
     private class ReservedThread extends ConcurrentStack.Node implements Runnable
