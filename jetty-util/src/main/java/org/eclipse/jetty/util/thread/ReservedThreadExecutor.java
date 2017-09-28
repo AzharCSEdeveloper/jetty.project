@@ -168,7 +168,7 @@ public class ReservedThreadExecutor extends AbstractLifeCycle implements Executo
     @Override
     public void doStart() throws Exception
     {
-        _lease = ThreadBudget.leaseFrom(getExecutor(),this,_queue.length);
+        _lease = ThreadBudget.leaseFrom(getExecutor(),this,_capacity);
         super.doStart();
     }
 
@@ -256,8 +256,8 @@ public class ReservedThreadExecutor extends AbstractLifeCycle implements Executo
     public String toString()
     {
         if (_owner==null)
-            return String.format("%s@%x{s=%d,p=%d}",this.getClass().getSimpleName(),hashCode(),_size,_pending);
-        return String.format("%s@%s{s=%d,p=%d}",this.getClass().getSimpleName(),_owner,_size,_pending);
+            return String.format("%s@%x{s=%d,p=%d}",this.getClass().getSimpleName(),hashCode(),_size.get(),_pending.get());
+        return String.format("%s@%s{s=%d,p=%d}",this.getClass().getSimpleName(),_owner,_size.get(),_pending.get());
     }
 
     private class ReservedThread extends ConcurrentStack.Node implements Runnable
